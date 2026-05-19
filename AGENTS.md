@@ -2,6 +2,8 @@
 
 ## Cursor Cloud specific instructions
 
+> **WARNING**: The instructions in this section are specific to the **Cursor Cloud Agent VM environment** (Ubuntu 24.04 containers with pre-installed OpenJDK 21, no Nix/devenv). **DO NOT** apply these paths, install locations, or wrapper scripts in any other environment (local dev, CI, devcontainers, etc.). For non-Cloud environments, use `devenv shell` as described in `docs/running.md`.
+
 This is a single-module Java 21 / Maven project (CQuirrel) that implements incremental TPC-H Q10 maintenance using Apache Flink. No external services (databases, queues, containers) are required.
 
 ### Prerequisites (installed by update script)

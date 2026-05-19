@@ -1,0 +1,6 @@
+PRAGMA enable_progress_bar;
+.timer on
+.mode box
+
+INSTALL tpch;
+LOAD tpch;

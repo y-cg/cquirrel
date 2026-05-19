@@ -1,0 +1,163 @@
+<?xml version="1.0"?>
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>hk.ust</groupId>
+    <artifactId>cquirrel</artifactId>
+    <version>0.1.0</version>
+    <packaging>jar</packaging>
+
+    <name>CQuirrel - AJU for TPC-H Q10</name>
+
+    <properties>
+        <maven.compiler.release>21</maven.compiler.release>
+        <target.java.version>21</target.java.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <flink.version>2.2.0</flink.version>
+        <log4j.version>2.25.3</log4j.version>
+        <scala.binary.version>2.12</scala.binary.version>
+        <error-prone.version>2.36.0</error-prone.version>
+        <spotless.version>2.44.4</spotless.version>
+    </properties>
+
+    <dependencies>
+        <!-- Apache Flink DataStream API -->
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-streaming-java</artifactId>
+            <version>${flink.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-clients</artifactId>
+            <version>${flink.version}</version>
+        </dependency>
+
+        <!-- Logging -->
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-slf4j-impl</artifactId>
+            <version>${log4j.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-api</artifactId>
+            <version>${log4j.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
+            <version>${log4j.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+    </dependencies>
+
+    <repositories>
+        <repository>
+            <id>apache.snapshots</id>
+            <name>Apache Development Snapshot Repository</name>
+            <url>https://repository.apache.org/content/repositories/snapshots/</url>
+            <releases>
+                <enabled>false</enabled>
+            </releases>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+        </repository>
+    </repositories>
+
+    <build>
+        <plugins>
+            <!-- Java Compiler with Error Prone -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.15.0</version>
+                <configuration>
+                    <source>${target.java.version}</source>
+                    <target>${target.java.version}</target>
+                    <!-- fork required so we can pass JVM args for Error Prone module access -->
+                    <fork>true</fork>
+                    <compilerArgs>
+                        <arg>-XDcompilePolicy=simple</arg>
+                        <arg>-Xplugin:ErrorProne</arg>
+                        <arg>--should-stop=ifError=FLOW</arg>
+                        <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED</arg>
+                        <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED</arg>
+                        <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED</arg>
+                        <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.model=ALL-UNNAMED</arg>
+                        <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED</arg>
+                        <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.processing=ALL-UNNAMED</arg>
+                        <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED</arg>
+                        <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED</arg>
+                        <arg>-J--add-opens=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED</arg>
+                        <arg>-J--add-opens=jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED</arg>
+                    </compilerArgs>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>com.google.errorprone</groupId>
+                            <artifactId>error_prone_core</artifactId>
+                            <version>${error-prone.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+
+            <!-- Code Formatter (google-java-format) -->
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <version>${spotless.version}</version>
+                <configuration>
+                    <java>
+                        <removeUnusedImports/>
+                        <googleJavaFormat/>
+                    </java>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <phase>verify</phase>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <profile>
+            <id>release</id>
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.flink</groupId>
+                    <artifactId>flink-streaming-java</artifactId>
+                    <version>${flink.version}</version>
+                    <scope>provided</scope>
+                </dependency>
+            </dependencies>
+        </profile>
+    </profiles>
+</project>

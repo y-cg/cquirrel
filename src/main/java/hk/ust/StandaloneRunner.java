@@ -2,6 +2,8 @@ package hk.ust;
 
 import hk.ust.aju.JoinResult;
 import hk.ust.aju.Q10ProcessFunction;
+import hk.ust.metrics.Phase;
+import hk.ust.metrics.RunMetrics;
 import hk.ust.model.*;
 import hk.ust.model.TupleUpdate.*;
 import hk.ust.source.TpchCsvParser;
@@ -30,114 +32,139 @@ public class StandaloneRunner {
 
     Path dir = Path.of(tpchDataDir);
 
-    // =====================================================================
-    // Initialize the AJU process function (bypassing Flink lifecycle)
-    // =====================================================================
+    try (RunMetrics metrics = RunMetrics.start("standalone", tpchDataDir)) {
+      Q10ProcessFunction processor = new Q10ProcessFunction();
+      processor.open(null);
 
-    Q10ProcessFunction processor = new Q10ProcessFunction();
-    processor.open(null);
+      List<JoinResult> deltas = new ArrayList<>();
+      var collector = new SimpleCollector<JoinResult>(deltas);
 
-    // Collect join deltas
-    List<JoinResult> deltas = new ArrayList<>();
-    var collector = new SimpleCollector<JoinResult>(deltas);
+      long updatesTotal = 0;
 
-    // =====================================================================
-    // Phase 1: Bulk load in bottom-up order
-    // =====================================================================
+      System.out.println("Loading nation...");
+      updatesTotal +=
+          processTable(dir.resolve("nation.tbl"), "nation", processor, collector, metrics);
 
-    long startTime = System.nanoTime();
+      System.out.println("Loading customer...");
+      updatesTotal +=
+          processTable(dir.resolve("customer.tbl"), "customer", processor, collector, metrics);
 
-    System.out.println("Loading nation...");
-    processTable(dir.resolve("nation.tbl"), "nation", processor, collector);
+      System.out.println("Loading orders...");
+      updatesTotal +=
+          processTable(dir.resolve("orders.tbl"), "orders", processor, collector, metrics);
 
-    System.out.println("Loading customer...");
-    processTable(dir.resolve("customer.tbl"), "customer", processor, collector);
+      System.out.println("Loading lineitem...");
+      updatesTotal +=
+          processTable(dir.resolve("lineitem.tbl"), "lineitem", processor, collector, metrics);
 
-    System.out.println("Loading orders...");
-    processTable(dir.resolve("orders.tbl"), "orders", processor, collector);
+      System.out.printf("Bulk load complete: %d join deltas.%n", deltas.size());
 
-    System.out.println("Loading lineitem...");
-    processTable(dir.resolve("lineitem.tbl"), "lineitem", processor, collector);
+      metrics.setUpdatesTotal(updatesTotal);
+      metrics.setJoinDeltasTotal(deltas.size());
 
-    long loadTime = System.nanoTime() - startTime;
-    System.out.printf(
-        "Bulk load complete: %d join deltas in %.3f seconds.%n", deltas.size(), loadTime / 1e9);
+      Map<Long, Long> revenueByCustomer;
+      Map<Long, JoinResult> customerInfo;
+      try (var phase = metrics.phase(Phase.AGGREGATE)) {
+        revenueByCustomer = new HashMap<>();
+        customerInfo = new HashMap<>();
 
-    // =====================================================================
-    // Aggregate: compute SUM(revenue) per customer group
-    // =====================================================================
-
-    Map<Long, Long> revenueByCustomer = new HashMap<>();
-    Map<Long, JoinResult> customerInfo = new HashMap<>();
-
-    for (JoinResult jr : deltas) {
-      if (jr.type() == UpdateType.INSERT) {
-        revenueByCustomer.merge(jr.cCustkey(), jr.revenue(), Long::sum);
-        customerInfo.putIfAbsent(jr.cCustkey(), jr);
-      } else {
-        revenueByCustomer.merge(jr.cCustkey(), -jr.revenue(), Long::sum);
+        for (JoinResult jr : deltas) {
+          if (jr.type() == UpdateType.INSERT) {
+            revenueByCustomer.merge(jr.cCustkey(), jr.revenue(), Long::sum);
+            customerInfo.putIfAbsent(jr.cCustkey(), jr);
+          } else {
+            revenueByCustomer.merge(jr.cCustkey(), -jr.revenue(), Long::sum);
+          }
+        }
       }
-    }
 
-    // =====================================================================
-    // Top-20 by revenue descending — write CSV output
-    // =====================================================================
+      String outputPath = System.getProperty("q10.output", "result/standalone-q10.csv");
+      Path outFile = Path.of(outputPath);
 
-    List<Map.Entry<Long, Long>> sorted = new ArrayList<>(revenueByCustomer.entrySet());
-    sorted.sort(Map.Entry.<Long, Long>comparingByValue().reversed());
-
-    String outputPath = System.getProperty("q10.output", "result/standalone-q10.csv");
-    Path outFile = Path.of(outputPath);
-    Files.createDirectories(outFile.getParent());
-
-    try (PrintWriter pw = new PrintWriter(Files.newBufferedWriter(outFile))) {
-      pw.println("c_custkey,c_name,revenue,c_acctbal,n_name,c_address,c_phone,c_comment");
-
-      int count = 0;
-      for (Map.Entry<Long, Long> entry : sorted) {
-        if (count >= 20) break;
-        long custkey = entry.getKey();
-        long revenue = entry.getValue();
-        if (revenue <= 0) break;
-
-        JoinResult info = customerInfo.get(custkey);
-        if (info == null) continue;
-
-        pw.printf(
-            "%d,%s,%.4f,%.2f,%s,\"%s\",%s,\"%s\"%n",
-            custkey,
-            info.cName(),
-            revenue / 100.0,
-            info.cAcctbal() / 100.0,
-            info.nName(),
-            info.cAddress().replace("\"", "\"\""),
-            info.cPhone(),
-            info.cComment().replace("\"", "\"\""));
-        count++;
+      List<Map.Entry<Long, Long>> sorted;
+      try (var topkPhase = metrics.phase(Phase.TOPK)) {
+        sorted = new ArrayList<>(revenueByCustomer.entrySet());
+        sorted.sort(Map.Entry.<Long, Long>comparingByValue().reversed());
       }
-    }
 
-    System.out.println("Q10 top-K results written to: " + outFile.toAbsolutePath());
-    System.out.printf("Total customer groups: %d%n", revenueByCustomer.size());
+      try (var sinkPhase = metrics.phase(Phase.SINK)) {
+        Files.createDirectories(outFile.getParent());
+
+        try (PrintWriter pw = new PrintWriter(Files.newBufferedWriter(outFile))) {
+          pw.println("c_custkey,c_name,revenue,c_acctbal,n_name,c_address,c_phone,c_comment");
+
+          int count = 0;
+          for (Map.Entry<Long, Long> entry : sorted) {
+            if (count >= 20) break;
+            long custkey = entry.getKey();
+            long revenue = entry.getValue();
+            if (revenue <= 0) break;
+
+            JoinResult info = customerInfo.get(custkey);
+            if (info == null) continue;
+
+            pw.printf(
+                "%d,%s,%.4f,%.2f,%s,\"%s\",%s,\"%s\"%n",
+                custkey,
+                info.cName(),
+                revenue / 100.0,
+                info.cAcctbal() / 100.0,
+                info.nName(),
+                info.cAddress().replace("\"", "\"\""),
+                info.cPhone(),
+                info.cComment().replace("\"", "\"\""));
+            count++;
+          }
+        }
+      }
+
+      System.out.println("Q10 top-K results written to: " + outFile.toAbsolutePath());
+      System.out.printf("Total customer groups: %d%n", revenueByCustomer.size());
+    }
   }
 
-  private static void processTable(
+  private static long processTable(
       Path file,
       String relation,
       Q10ProcessFunction processor,
-      SimpleCollector<JoinResult> collector)
+      SimpleCollector<JoinResult> collector,
+      RunMetrics metrics)
       throws Exception {
-    if (!Files.exists(file)) return;
+    if (!Files.exists(file)) {
+      return 0;
+    }
+
+    long updates = 0;
+    long loadNs = 0;
+    long ajuNs = 0;
+
     try (BufferedReader reader = Files.newBufferedReader(file)) {
       String line;
       while ((line = reader.readLine()) != null) {
-        if (line.isBlank()) continue;
-        TupleUpdate update = parseLine(line, relation, UpdateType.INSERT);
+        if (line.isBlank()) {
+          continue;
+        }
+
+        TupleUpdate update;
+        long t0 = System.nanoTime();
+        update = parseLine(line, relation, UpdateType.INSERT);
+        loadNs += System.nanoTime() - t0;
+
         if (update != null) {
+          t0 = System.nanoTime();
           processor.processElement(update, null, collector);
+          ajuNs += System.nanoTime() - t0;
+          updates++;
+          if (updates % 100_000 == 0) {
+            metrics.sampleMemory();
+          }
         }
       }
     }
+
+    metrics.addPhaseDuration(Phase.LOAD, loadNs);
+    metrics.addPhaseDuration(Phase.AJU, ajuNs);
+    return updates;
   }
 
   private static TupleUpdate parseLine(String line, String relation, UpdateType type) {

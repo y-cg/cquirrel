@@ -125,7 +125,7 @@ java -cp target/cquirrel-0.1.0.jar:$(mvn dependency:build-classpath -q -Dmdep.ou
 ### Flink Streaming Job
 
 Runs the full AJU pipeline as a Flink streaming application:
-Source -> Q10ProcessFunction -> Q10Aggregator -> TopKMaintainer -> DeltaSink
+TpchUpdateSource -> Q10UnifiedBatchFunction (AJU + batch aggregate + top-K) -> discarding sink
 
 ```sh
 mvn -q exec:java -Dexec.mainClass=hk.ust.AjuStreamJob

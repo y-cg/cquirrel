@@ -73,20 +73,7 @@ public class TopKMaintainer extends ProcessFunction<AggregateResult, AggregateRe
       latestResult.put(custkey, result);
     }
 
-    // Emit current top-K
-    // TODO: optimize to only emit when the top-K set actually changes
-    int count = 0;
-    for (Map.Entry<Long, Set<Long>> entry : revenueIndex.entrySet()) {
-      for (long key : entry.getValue()) {
-        AggregateResult r = latestResult.get(key);
-        if (r != null) {
-          out.collect(r);
-          count++;
-          if (count >= K) return;
-        }
-      }
-      if (count >= K) return;
-    }
+    // Top-K is finalized once in close() for batch-style runs; no per-update downstream emits.
   }
 
   @Override

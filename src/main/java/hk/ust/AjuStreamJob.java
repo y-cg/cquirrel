@@ -1,37 +1,24 @@
 package hk.ust;
 
 import hk.ust.aggregate.Q10Aggregator;
-import hk.ust.aggregate.TopKMaintainer;
-import hk.ust.aju.JoinResult;
-import hk.ust.aju.Q10ProcessFunction;
+import hk.ust.aggregate.Q10UnifiedBatchFunction;
 import hk.ust.metrics.Phase;
 import hk.ust.metrics.RunMetrics;
 import hk.ust.model.TupleUpdate;
-import hk.ust.model.TupleUpdate.*;
-import hk.ust.model.UpdateType;
-import hk.ust.sink.DeltaSink;
-import hk.ust.source.TpchCsvParser;
-import java.io.BufferedReader;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
+import hk.ust.source.TpchUpdateCounter;
+import hk.ust.source.TpchUpdateSource;
 import org.apache.flink.api.common.JobExecutionResult;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.sink.legacy.DiscardingSink;
+import java.nio.file.Path;
 
 /**
  * AJU (Acyclic Join under Updates) streaming job for TPC-H Q10.
  *
- * <p>Implements the algorithm from: Qichen Wang, Ke Yi. "Maintaining Acyclic Foreign-Key Joins
- * under Updates." SIGMOD 2020.
- *
- * <p>Pipeline: Source -> Q10ProcessFunction -> Q10Aggregator -> TopKMaintainer -> DeltaSink
- *
- * <p>The Q10ProcessFunction is the core AJU algorithm that incrementally maintains the 4-way join
- * result. It emits per-lineitem join deltas which are then aggregated into per-customer revenue
- * sums and filtered to top-20.
+ * <p>Pipeline: {@link TpchUpdateSource} -> {@link Q10UnifiedBatchFunction} (AJU + batch aggregate +
+ * top-K in one operator, matching standalone finalization).
  */
 public class AjuStreamJob {
 
@@ -48,52 +35,27 @@ public class AjuStreamJob {
       env.setParallelism(1);
 
       Path dir = Path.of(tpchDataDir);
-      List<TupleUpdate> allUpdates = new ArrayList<>();
 
-      long updatesLoaded;
+      long updatesTotal;
       try (var loadPhase = metrics.phase(Phase.LOAD)) {
-        System.out.println("Loading TPC-H data from: " + dir);
-        loadTable(dir.resolve("nation.tbl"), allUpdates, "nation");
-        loadTable(dir.resolve("customer.tbl"), allUpdates, "customer");
-        loadTable(dir.resolve("orders.tbl"), allUpdates, "orders");
-        loadTable(dir.resolve("lineitem.tbl"), allUpdates, "lineitem");
-
-        for (int i = 1; ; i++) {
-          Path lineitemUpdate = dir.resolve("lineitem.tbl.u" + i);
-          Path ordersUpdate = dir.resolve("orders.tbl.u" + i);
-          if (!Files.exists(lineitemUpdate) && !Files.exists(ordersUpdate)) {
-            break;
-          }
-          if (Files.exists(ordersUpdate)) {
-            loadUpdateFile(ordersUpdate, allUpdates, "orders");
-          }
-          if (Files.exists(lineitemUpdate)) {
-            loadUpdateFile(lineitemUpdate, allUpdates, "lineitem");
-          }
-        }
-        updatesLoaded = allUpdates.size();
-        System.out.printf("Loaded %d update records.%n", updatesLoaded);
+        System.out.println("Counting TPC-H updates in: " + dir);
+        updatesTotal = TpchUpdateCounter.count(dir);
+        System.out.printf("Will process %d update records.%n", updatesTotal);
       }
 
-      metrics.setUpdatesTotal(updatesLoaded);
-      metrics.setPreloadUpdatesCount(updatesLoaded);
+      metrics.setUpdatesTotal(updatesTotal);
+      metrics.setPreloadUpdatesCount(0);
 
       DataStream<TupleUpdate> updates =
-          env.fromCollection(allUpdates, TypeInformation.of(TupleUpdate.class))
-              .name("tpch-update-source");
+          env.addSource(new TpchUpdateSource(tpchDataDir), "tpch-update-source")
+              .returns(TypeInformation.of(TupleUpdate.class));
 
-      DataStream<JoinResult> joinDeltas =
-          updates.process(new Q10ProcessFunction()).name("aju-q10-join");
+      updates
+          .process(new Q10UnifiedBatchFunction())
+          .name("aju-q10-unified-batch")
+          .addSink(new DiscardingSink<Q10Aggregator.AggregateResult>())
+          .name("discarding-sink");
 
-      DataStream<Q10Aggregator.AggregateResult> aggregated =
-          joinDeltas.process(new Q10Aggregator()).name("q10-aggregator");
-
-      DataStream<Q10Aggregator.AggregateResult> topK =
-          aggregated.process(new TopKMaintainer()).name("top-k-maintainer");
-
-      topK.addSink(new DeltaSink()).name("delta-sink");
-
-      // Flink runs AJU + aggregate + top-K + sink inside execute; L0 records it under aju.
       JobExecutionResult result;
       try (var pipelinePhase = metrics.phase(Phase.AJU)) {
         result = env.execute("AJU Q10");
@@ -103,44 +65,5 @@ public class AjuStreamJob {
         System.out.printf("Flink job finished in %d ms.%n", result.getNetRuntime());
       }
     }
-  }
-
-  private static void loadTable(Path file, List<TupleUpdate> updates, String relation)
-      throws Exception {
-    if (!Files.exists(file)) return;
-    try (BufferedReader reader = Files.newBufferedReader(file)) {
-      String line;
-      while ((line = reader.readLine()) != null) {
-        if (line.isBlank()) continue;
-        TupleUpdate update = parseLine(line, relation, UpdateType.INSERT);
-        if (update != null) updates.add(update);
-      }
-    }
-  }
-
-  private static void loadUpdateFile(Path file, List<TupleUpdate> updates, String relation)
-      throws Exception {
-    if (!Files.exists(file)) return;
-    try (BufferedReader reader = Files.newBufferedReader(file)) {
-      String line;
-      boolean isDelete = true;
-      while ((line = reader.readLine()) != null) {
-        if (line.isBlank()) continue;
-        UpdateType type = isDelete ? UpdateType.DELETE : UpdateType.INSERT;
-        TupleUpdate update = parseLine(line, relation, type);
-        if (update != null) updates.add(update);
-        isDelete = !isDelete;
-      }
-    }
-  }
-
-  private static TupleUpdate parseLine(String line, String relation, UpdateType type) {
-    return switch (relation) {
-      case "nation" -> new NationUpdate(type, TpchCsvParser.parseNation(line));
-      case "customer" -> new CustomerUpdate(type, TpchCsvParser.parseCustomer(line));
-      case "orders" -> new OrdersUpdate(type, TpchCsvParser.parseOrders(line));
-      case "lineitem" -> new LineitemUpdate(type, TpchCsvParser.parseLineitem(line));
-      default -> null;
-    };
   }
 }

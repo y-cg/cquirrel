@@ -12,6 +12,7 @@ in
 {
   env.TPCH_DATA_DIR = "${config.devenv.root}/tpch_data";
   env.DUCKDB_RC = "${config.devenv.root}/.duckdbrc";
+  env.CQUIRREL_METRICS_OUT = "${config.devenv.root}/result/metrics.jsonl";
 
   # https://devenv.sh/packages/
   packages = with pkgs; [

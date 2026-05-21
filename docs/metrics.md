@@ -27,7 +27,7 @@ CQuirrel collects **run-level (L0)** metrics at the end of each execution: phase
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CQUIRREL_METRICS` | `on` | Set to `off` or `false` to disable |
-| `CQUIRREL_METRICS_OUT` | (none) | Append one JSON line per run to this file |
+| `CQUIRREL_METRICS_OUT` | `result/metrics.jsonl` in devenv shell | Append one JSON line per run to this file |
 
 ## Example
 

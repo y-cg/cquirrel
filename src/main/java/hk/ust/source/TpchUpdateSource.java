@@ -1,5 +1,7 @@
 package hk.ust.source;
 
+import hk.ust.metrics.FlinkOperatorTimings;
+import hk.ust.metrics.Phase;
 import hk.ust.model.*;
 import hk.ust.model.TupleUpdate.*;
 import java.io.BufferedReader;
@@ -61,12 +63,9 @@ public class TpchUpdateSource extends RichSourceFunction<TupleUpdate> {
     if (!Files.exists(file)) return;
     try (BufferedReader reader = Files.newBufferedReader(file)) {
       String line;
-      while (running && (line = reader.readLine()) != null) {
+      while (running && (line = readTimedLine(reader)) != null) {
         if (line.isBlank()) continue;
-        TupleUpdate update = parseLine(line, relation, UpdateType.INSERT);
-        if (update != null) {
-          ctx.collect(update);
-        }
+        parseAndCollect(line, relation, UpdateType.INSERT, ctx);
       }
     }
   }
@@ -81,16 +80,33 @@ public class TpchUpdateSource extends RichSourceFunction<TupleUpdate> {
     try (BufferedReader reader = Files.newBufferedReader(file)) {
       String line;
       boolean isDelete = true; // First line of each pair is a DELETE
-      while (running && (line = reader.readLine()) != null) {
+      while (running && (line = readTimedLine(reader)) != null) {
         if (line.isBlank()) continue;
         UpdateType type = isDelete ? UpdateType.DELETE : UpdateType.INSERT;
-        TupleUpdate update = parseLine(line, relation, type);
-        if (update != null) {
-          ctx.collect(update);
-        }
+        parseAndCollect(line, relation, type, ctx);
         isDelete = !isDelete;
       }
     }
+  }
+
+  private String readTimedLine(BufferedReader reader) throws IOException {
+    long t0 = System.nanoTime();
+    String line = reader.readLine();
+    FlinkOperatorTimings.add(Phase.LOAD, System.nanoTime() - t0);
+    return line;
+  }
+
+  private TupleUpdate parseAndCollect(
+      String line, String relation, UpdateType type, SourceContext<TupleUpdate> ctx) {
+    long t0 = System.nanoTime();
+    TupleUpdate update = parseLine(line, relation, type);
+    FlinkOperatorTimings.add(Phase.LOAD, System.nanoTime() - t0);
+    if (update != null) {
+      t0 = System.nanoTime();
+      ctx.collect(update);
+      FlinkOperatorTimings.add(Phase.RUNTIME, System.nanoTime() - t0);
+    }
+    return update;
   }
 
   private TupleUpdate parseLine(String line, String relation, UpdateType type) {

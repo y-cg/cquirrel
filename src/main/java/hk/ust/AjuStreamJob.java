@@ -2,17 +2,19 @@ package hk.ust;
 
 import hk.ust.aggregate.Q10Aggregator;
 import hk.ust.aggregate.Q10UnifiedBatchFunction;
+import hk.ust.metrics.FlinkBreakdownReporter;
+import hk.ust.metrics.FlinkOperatorTimings;
 import hk.ust.metrics.Phase;
 import hk.ust.metrics.RunMetrics;
 import hk.ust.model.TupleUpdate;
 import hk.ust.source.TpchUpdateCounter;
 import hk.ust.source.TpchUpdateSource;
+import java.nio.file.Path;
 import org.apache.flink.api.common.JobExecutionResult;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.legacy.DiscardingSink;
-import java.nio.file.Path;
 
 /**
  * AJU (Acyclic Join under Updates) streaming job for TPC-H Q10.
@@ -37,11 +39,9 @@ public class AjuStreamJob {
       Path dir = Path.of(tpchDataDir);
 
       long updatesTotal;
-      try (var loadPhase = metrics.phase(Phase.LOAD)) {
-        System.out.println("Counting TPC-H updates in: " + dir);
-        updatesTotal = TpchUpdateCounter.count(dir);
-        System.out.printf("Will process %d update records.%n", updatesTotal);
-      }
+      System.out.println("Counting TPC-H updates in: " + dir);
+      updatesTotal = TpchUpdateCounter.count(dir);
+      System.out.printf("Will process %d update records.%n", updatesTotal);
 
       metrics.setUpdatesTotal(updatesTotal);
       metrics.setPreloadUpdatesCount(0);
@@ -56,13 +56,21 @@ public class AjuStreamJob {
           .addSink(new DiscardingSink<Q10Aggregator.AggregateResult>())
           .name("discarding-sink");
 
-      JobExecutionResult result;
-      try (var pipelinePhase = metrics.phase(Phase.AJU)) {
-        result = env.execute("AJU Q10");
-      }
+      FlinkOperatorTimings.reset();
+
+      long executeStartNs = System.nanoTime();
+      JobExecutionResult result = env.execute("AJU Q10");
+      long executeWallNs = System.nanoTime() - executeStartNs;
+
+      FlinkOperatorTimings.recordClusterOverhead(executeWallNs);
+      FlinkOperatorTimings.flushTo(metrics);
+      FlinkOperatorTimings.flushClusterTo(metrics);
+
+      long executeWallMs = executeWallNs / 1_000_000L;
+      FlinkBreakdownReporter.print(executeWallMs, metrics.phasesMsSnapshot());
 
       if (result != null) {
-        System.out.printf("Flink job finished in %d ms.%n", result.getNetRuntime());
+        System.out.printf("Flink job finished in %d ms (JobExecutionResult.getNetRuntime).%n", result.getNetRuntime());
       }
     }
   }

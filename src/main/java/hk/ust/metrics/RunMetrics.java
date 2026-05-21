@@ -113,6 +113,15 @@ public class RunMetrics implements AutoCloseable {
     }
   }
 
+  /** Returns phase durations accumulated so far (milliseconds). */
+  public Map<String, Long> phasesMsSnapshot() {
+    Map<String, Long> phasesMs = new LinkedHashMap<>();
+    for (Phase phase : Phase.values()) {
+      phasesMs.put(phase.id(), nanosToMillis(phaseDurationsNs.get(phase)));
+    }
+    return phasesMs;
+  }
+
   private MetricsSnapshot buildSnapshot() {
     long wallTimeMs = nanosToMillis(System.nanoTime() - wallStartNs);
 
@@ -121,7 +130,7 @@ public class RunMetrics implements AutoCloseable {
     for (Phase phase : Phase.values()) {
       long phaseMs = nanosToMillis(phaseDurationsNs.get(phase));
       phasesMs.put(phase.id(), phaseMs);
-      if (phase != Phase.LOAD) {
+      if (phase != Phase.LOAD && phase != Phase.RUNTIME && phase != Phase.CLUSTER) {
         processingTimeMs += phaseMs;
       }
     }

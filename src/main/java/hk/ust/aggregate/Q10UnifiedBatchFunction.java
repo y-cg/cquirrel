@@ -2,6 +2,8 @@ package hk.ust.aggregate;
 
 import hk.ust.aju.JoinResult;
 import hk.ust.aju.Q10ProcessFunction;
+import hk.ust.metrics.FlinkOperatorTimings;
+import hk.ust.metrics.Phase;
 import hk.ust.model.TupleUpdate;
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
@@ -42,7 +44,10 @@ public class Q10UnifiedBatchFunction
         new Collector<JoinResult>() {
           @Override
           public void collect(JoinResult record) {
+            long t0 = System.nanoTime();
             aggregator.apply(record);
+            FlinkOperatorTimings.add(Phase.AGGREGATE, System.nanoTime() - t0);
+            FlinkOperatorTimings.recordJoinDelta();
           }
 
           @Override
@@ -53,13 +58,15 @@ public class Q10UnifiedBatchFunction
   @Override
   public void processElement(
       TupleUpdate update, Context ctx, Collector<Q10Aggregator.AggregateResult> out) {
+    long t0 = System.nanoTime();
     aju.processElement(update, null, joinDeltaCollector);
+    FlinkOperatorTimings.add(Phase.AJU, System.nanoTime() - t0);
   }
 
   @Override
   public void close() throws Exception {
     try {
-      Q10TopKWriter.writeCsv(aggregator, outputPath);
+      Q10TopKWriter.writeCsvTimed(aggregator, outputPath, FlinkOperatorTimings::add);
     } finally {
       super.close();
     }

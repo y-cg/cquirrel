@@ -1,29 +1,25 @@
 package hk.ust.aggregate;
 
-import hk.ust.aju.JoinResult;
-import hk.ust.aju.Q10ProcessFunction;
+import hk.ust.engine.CsvQ10OutputSink;
+import hk.ust.engine.OutputPolicyConfig;
+import hk.ust.engine.Q10BatchEngine;
 import hk.ust.metrics.FlinkOperatorTimings;
-import hk.ust.metrics.Phase;
 import hk.ust.model.TupleUpdate;
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 
 /**
- * Single-operator Flink path aligned with {@link hk.ust.StandaloneRunner}:
- *
- * <p>AJU join maintenance + in-operator revenue aggregation (no per-delta downstream records) + one
- * top-K sort and CSV write in {@link #close()}.
+ * Flink operator wrapper around {@link Q10BatchEngine}.
  */
 public class Q10UnifiedBatchFunction
     extends ProcessFunction<TupleUpdate, Q10Aggregator.AggregateResult> {
 
   private static final String DEFAULT_OUTPUT = "result/flink-q10.csv";
 
-  private transient Q10ProcessFunction aju;
-  private transient Q10RevenueAggregator aggregator;
-  private transient Collector<JoinResult> joinDeltaCollector;
+  private static volatile long lastJoinDeltasTotal;
 
+  private transient Q10BatchEngine engine;
   private final String outputPath;
 
   public Q10UnifiedBatchFunction() {
@@ -34,39 +30,40 @@ public class Q10UnifiedBatchFunction
     this.outputPath = outputPath;
   }
 
+  public static long lastJoinDeltasTotal() {
+    return lastJoinDeltasTotal;
+  }
+
   @Override
   public void open(OpenContext openContext) throws Exception {
-    aju = new Q10ProcessFunction();
-    aju.open(openContext);
-    aggregator = new Q10RevenueAggregator();
-    aggregator.open();
-    joinDeltaCollector =
-        new Collector<JoinResult>() {
-          @Override
-          public void collect(JoinResult record) {
-            long t0 = System.nanoTime();
-            aggregator.apply(record);
-            FlinkOperatorTimings.add(Phase.AGGREGATE, System.nanoTime() - t0);
-            FlinkOperatorTimings.recordJoinDelta();
-          }
-
-          @Override
-          public void close() {}
-        };
+    engine =
+        new Q10BatchEngine(
+            OutputPolicyConfig.outputPolicy(),
+            OutputPolicyConfig.inputBatchSize(),
+            new CsvQ10OutputSink(outputPath),
+            FlinkOperatorTimings::add);
+    engine.open();
+    System.out.printf(
+        "Q10BatchEngine policy=%s inputBatchSize=%s%n",
+        engine.outputPolicy(),
+        engine.inputBatchSize() == Integer.MAX_VALUE ? "unbounded" : engine.inputBatchSize());
   }
 
   @Override
   public void processElement(
       TupleUpdate update, Context ctx, Collector<Q10Aggregator.AggregateResult> out) {
-    long t0 = System.nanoTime();
-    aju.processElement(update, null, joinDeltaCollector);
-    FlinkOperatorTimings.add(Phase.AJU, System.nanoTime() - t0);
+    try {
+      engine.processUpdate(update);
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
   }
 
   @Override
   public void close() throws Exception {
     try {
-      Q10TopKWriter.writeCsvTimed(aggregator, outputPath, FlinkOperatorTimings::add);
+      engine.finish();
+      lastJoinDeltasTotal = engine.joinDeltasTotal();
     } finally {
       super.close();
     }

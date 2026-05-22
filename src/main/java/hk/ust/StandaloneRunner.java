@@ -1,26 +1,22 @@
 package hk.ust;
 
-import hk.ust.aju.JoinResult;
-import hk.ust.aju.Q10ProcessFunction;
+import hk.ust.engine.CsvQ10OutputSink;
+import hk.ust.engine.OutputPolicyConfig;
+import hk.ust.engine.Q10BatchEngine;
 import hk.ust.metrics.Phase;
 import hk.ust.metrics.RunMetrics;
 import hk.ust.model.*;
 import hk.ust.model.TupleUpdate.*;
 import hk.ust.source.TpchCsvParser;
 import java.io.BufferedReader;
-import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
 
 /**
  * Standalone (non-Flink) runner for the AJU Q10 algorithm.
  *
- * <p>Runs the algorithm in a single thread without Flink's distributed runtime, matching the
- * paper's "single-thread standalone mode" evaluation. This is useful for correctness verification
- * and profiling without Flink overhead.
- *
- * <p>Usage: java -cp ... hk.ust.StandaloneRunner (requires TPCH_DATA_DIR environment variable)
+ * <p>Uses {@link Q10BatchEngine} with configurable input batch size and {@link
+ * hk.ust.engine.OutputPolicy}.
  */
 public class StandaloneRunner {
 
@@ -31,112 +27,46 @@ public class StandaloneRunner {
     }
 
     Path dir = Path.of(tpchDataDir);
+    String outputPath = System.getProperty("q10.output", "result/standalone-q10.csv");
 
     try (RunMetrics metrics = RunMetrics.start("standalone", tpchDataDir)) {
-      Q10ProcessFunction processor = new Q10ProcessFunction();
-      processor.open(null);
-
-      List<JoinResult> deltas = new ArrayList<>();
-      var collector = new SimpleCollector<JoinResult>(deltas);
+      Q10BatchEngine engine =
+          new Q10BatchEngine(
+              OutputPolicyConfig.outputPolicy(),
+              OutputPolicyConfig.inputBatchSize(),
+              new CsvQ10OutputSink(outputPath),
+              metrics::addPhaseDuration);
+      engine.open();
 
       long updatesTotal = 0;
+      System.out.printf(
+          "Output policy: %s, input batch size: %s%n",
+          engine.outputPolicy(),
+          engine.inputBatchSize() == Integer.MAX_VALUE ? "unbounded" : engine.inputBatchSize());
 
-      System.out.println("Loading nation...");
+      updatesTotal += processTable(dir.resolve("nation.tbl"), "nation", engine, metrics, "nation");
+      updatesTotal += processTable(dir.resolve("customer.tbl"), "customer", engine, metrics, "customer");
+      updatesTotal += processTable(dir.resolve("orders.tbl"), "orders", engine, metrics, "orders");
       updatesTotal +=
-          processTable(dir.resolve("nation.tbl"), "nation", processor, collector, metrics);
+          processTable(dir.resolve("lineitem.tbl"), "lineitem", engine, metrics, "lineitem");
 
-      System.out.println("Loading customer...");
-      updatesTotal +=
-          processTable(dir.resolve("customer.tbl"), "customer", processor, collector, metrics);
-
-      System.out.println("Loading orders...");
-      updatesTotal +=
-          processTable(dir.resolve("orders.tbl"), "orders", processor, collector, metrics);
-
-      System.out.println("Loading lineitem...");
-      updatesTotal +=
-          processTable(dir.resolve("lineitem.tbl"), "lineitem", processor, collector, metrics);
-
-      System.out.printf("Bulk load complete: %d join deltas.%n", deltas.size());
+      engine.finish();
 
       metrics.setUpdatesTotal(updatesTotal);
-      metrics.setJoinDeltasTotal(deltas.size());
-
-      Map<Long, Long> revenueByCustomer;
-      Map<Long, JoinResult> customerInfo;
-      try (var phase = metrics.phase(Phase.AGGREGATE)) {
-        revenueByCustomer = new HashMap<>();
-        customerInfo = new HashMap<>();
-
-        for (JoinResult jr : deltas) {
-          if (jr.type() == UpdateType.INSERT) {
-            revenueByCustomer.merge(jr.cCustkey(), jr.revenue(), Long::sum);
-            customerInfo.putIfAbsent(jr.cCustkey(), jr);
-          } else {
-            revenueByCustomer.merge(jr.cCustkey(), -jr.revenue(), Long::sum);
-          }
-        }
-      }
-
-      String outputPath = System.getProperty("q10.output", "result/standalone-q10.csv");
-      Path outFile = Path.of(outputPath);
-
-      List<Map.Entry<Long, Long>> sorted;
-      try (var topkPhase = metrics.phase(Phase.TOPK)) {
-        sorted = new ArrayList<>(revenueByCustomer.entrySet());
-        sorted.sort(Map.Entry.<Long, Long>comparingByValue().reversed());
-      }
-
-      try (var sinkPhase = metrics.phase(Phase.SINK)) {
-        Files.createDirectories(outFile.getParent());
-
-        try (PrintWriter pw = new PrintWriter(Files.newBufferedWriter(outFile))) {
-          pw.println("c_custkey,c_name,revenue,c_acctbal,n_name,c_address,c_phone,c_comment");
-
-          int count = 0;
-          for (Map.Entry<Long, Long> entry : sorted) {
-            if (count >= 20) break;
-            long custkey = entry.getKey();
-            long revenue = entry.getValue();
-            if (revenue <= 0) break;
-
-            JoinResult info = customerInfo.get(custkey);
-            if (info == null) continue;
-
-            pw.printf(
-                "%d,%s,%.4f,%.2f,%s,\"%s\",%s,\"%s\"%n",
-                custkey,
-                info.cName(),
-                revenue / 100.0,
-                info.cAcctbal() / 100.0,
-                info.nName(),
-                info.cAddress().replace("\"", "\"\""),
-                info.cPhone(),
-                info.cComment().replace("\"", "\"\""));
-            count++;
-          }
-        }
-      }
-
-      System.out.println("Q10 top-K results written to: " + outFile.toAbsolutePath());
-      System.out.printf("Total customer groups: %d%n", revenueByCustomer.size());
+      metrics.setJoinDeltasTotal(engine.joinDeltasTotal());
+      System.out.printf("Bulk load complete: %d join deltas.%n", engine.joinDeltasTotal());
     }
   }
 
   private static long processTable(
-      Path file,
-      String relation,
-      Q10ProcessFunction processor,
-      SimpleCollector<JoinResult> collector,
-      RunMetrics metrics)
+      Path file, String relation, Q10BatchEngine engine, RunMetrics metrics, String label)
       throws Exception {
     if (!Files.exists(file)) {
       return 0;
     }
 
+    System.out.println("Loading " + label + "...");
     long updates = 0;
-    long loadNs = 0;
-    long ajuNs = 0;
 
     try (BufferedReader reader = Files.newBufferedReader(file)) {
       String line;
@@ -145,15 +75,12 @@ public class StandaloneRunner {
           continue;
         }
 
-        TupleUpdate update;
         long t0 = System.nanoTime();
-        update = parseLine(line, relation, UpdateType.INSERT);
-        loadNs += System.nanoTime() - t0;
+        TupleUpdate update = parseLine(line, relation, UpdateType.INSERT);
+        metrics.addPhaseDuration(Phase.LOAD, System.nanoTime() - t0);
 
         if (update != null) {
-          t0 = System.nanoTime();
-          processor.processElement(update, null, collector);
-          ajuNs += System.nanoTime() - t0;
+          engine.processUpdate(update);
           updates++;
           if (updates % 100_000 == 0) {
             metrics.sampleMemory();
@@ -162,8 +89,7 @@ public class StandaloneRunner {
       }
     }
 
-    metrics.addPhaseDuration(Phase.LOAD, loadNs);
-    metrics.addPhaseDuration(Phase.AJU, ajuNs);
+    engine.endInputBatch();
     return updates;
   }
 
@@ -175,23 +101,5 @@ public class StandaloneRunner {
       case "lineitem" -> new LineitemUpdate(type, TpchCsvParser.parseLineitem(line));
       default -> null;
     };
-  }
-
-  /** Minimal Collector implementation that just appends to a list. */
-  private static class SimpleCollector<T> implements org.apache.flink.util.Collector<T> {
-
-    private final List<T> results;
-
-    SimpleCollector(List<T> results) {
-      this.results = results;
-    }
-
-    @Override
-    public void collect(T record) {
-      results.add(record);
-    }
-
-    @Override
-    public void close() {}
   }
 }

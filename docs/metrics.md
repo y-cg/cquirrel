@@ -32,6 +32,8 @@ CQuirrel collects **run-level (L0)** metrics at the end of each execution: phase
 |----------|---------|-------------|
 | `CQUIRREL_METRICS` | `on` | Set to `off` or `false` to disable |
 | `CQUIRREL_METRICS_OUT` | `result/metrics.jsonl` in devenv shell | Append one JSON line per run to this file |
+| `CQUIRREL_OUTPUT_POLICY` | `ON_JOB_END` | See [docs/running.md](running.md) |
+| `CQUIRREL_INPUT_BATCH_SIZE` | unbounded | Input batch size for `Q10BatchEngine` |
 
 ## Example
 

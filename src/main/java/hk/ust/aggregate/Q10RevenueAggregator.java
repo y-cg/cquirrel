@@ -16,7 +16,7 @@ public class Q10RevenueAggregator {
   private transient Map<Long, GroupInfo> groupInfo;
   private transient Map<Long, Integer> countByCustomer;
 
-  record GroupInfo(
+  public record GroupInfo(
       String cName, long cAcctbal, String nName, String cAddress, String cPhone, String cComment) {}
 
   public void open() {
@@ -46,6 +46,19 @@ public class Q10RevenueAggregator {
       }
     }
   }
+
+  /** Applies one delta and returns the customer's current aggregate state. */
+  public GroupState applyAndGetState(JoinResult jr) {
+    apply(jr);
+    long custkey = jr.cCustkey();
+    Long revenue = revenueByCustomer.get(custkey);
+    if (revenue == null) {
+      return new GroupState(custkey, 0L, null);
+    }
+    return new GroupState(custkey, revenue, groupInfo.get(custkey));
+  }
+
+  public record GroupState(long custkey, long revenueCents, GroupInfo info) {}
 
   public Map<Long, Long> revenueByCustomer() {
     return revenueByCustomer;

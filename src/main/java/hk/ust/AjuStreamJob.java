@@ -64,6 +64,7 @@ public class AjuStreamJob {
 
       FlinkOperatorTimings.recordClusterOverhead(executeWallNs);
       FlinkOperatorTimings.flushTo(metrics);
+      metrics.setJoinDeltasTotal(Q10UnifiedBatchFunction.lastJoinDeltasTotal());
       FlinkOperatorTimings.flushClusterTo(metrics);
 
       long executeWallMs = executeWallNs / 1_000_000L;

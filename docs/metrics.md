@@ -6,8 +6,13 @@ CQuirrel collects **run-level (L0)** metrics at the end of each execution: phase
 
 | Field | Description |
 |-------|-------------|
+| `pipeline_mode` | Flink pipeline: `unified`, `split`, or `partitioned` |
+| `parallelism` | Global Flink parallelism (`CQUIRREL_PARALLELISM`) |
+| `aju_parallelism` | AJU operator parallelism (partitioned mode; otherwise `1`) |
+| `agg_parallelism` | Aggregation operator parallelism |
+| `shuffle_ms` | Reserved for shuffle timing (currently `0`) |
 | `updates_total` | Tuple updates processed (input count) |
-| `join_deltas_total` | Join deltas emitted (standalone only; Flink reports `0`) |
+| `join_deltas_total` | Join deltas emitted from AJU (Flink and standalone) |
 | `phases_ms` | `load`, `aju`, `aggregate`, `topk`, `sink` |
 | `wall_time_ms` | Total wall time including load |
 | `processing_time_ms` | Sum of `aju` + `aggregate` + `topk` + `sink` (excludes `load`) |
@@ -34,13 +39,22 @@ CQuirrel collects **run-level (L0)** metrics at the end of each execution: phase
 | `CQUIRREL_METRICS_OUT` | `result/metrics.jsonl` in devenv shell | Append one JSON line per run to this file |
 | `CQUIRREL_OUTPUT_POLICY` | `ON_JOB_END` | See [docs/running.md](running.md) |
 | `CQUIRREL_INPUT_BATCH_SIZE` | unbounded | Input batch size for `Q10BatchEngine` |
+| `CQUIRREL_PARALLELISM` | `1` | Global Flink parallelism for multi-core benchmarks |
+| `CQUIRREL_AJU_PARALLELISM` | inherits `CQUIRREL_PARALLELISM` | AJU operator parallelism (partitioned mode) |
+| `CQUIRREL_AGG_PARALLELISM` | inherits `CQUIRREL_PARALLELISM` | Aggregation operator parallelism |
+| `CQUIRREL_PIPELINE` | `unified` | `unified`, `split`, or `partitioned` — see [docs/benchmark.md](benchmark.md) |
 
 ## Example
 
 ```bash
 export TPCH_DATA_DIR=/path/to/tpch
 export CQUIRREL_METRICS_OUT=result/metrics.jsonl
-mvn -q exec:java -Dexec.mainClass=hk.ust.StandaloneRunner
+export CQUIRREL_PIPELINE=partitioned
+export CQUIRREL_PARALLELISM=4
+mvn -q compile exec:exec \
+  -Dexec.executable=java \
+  -Dexec.classpathScope=runtime \
+  -Dexec.args="-classpath %classpath hk.ust.AjuStreamJob"
 ```
 
 Console output ends with a summary table; optional JSON lines are appended to the output file.

@@ -41,7 +41,8 @@ public class Q10UnifiedBatchFunction
             OutputPolicyConfig.outputPolicy(),
             OutputPolicyConfig.inputBatchSize(),
             new CsvQ10OutputSink(outputPath),
-            FlinkOperatorTimings::add);
+            FlinkOperatorTimings::add,
+            FlinkOperatorTimings::recordJoinDelta);
     engine.open();
     System.out.printf(
         "Q10BatchEngine policy=%s inputBatchSize=%s%n",

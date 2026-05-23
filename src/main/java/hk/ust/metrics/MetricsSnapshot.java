@@ -18,7 +18,12 @@ public record MetricsSnapshot(
     double joinDeltasPerSec,
     long heapUsedMbPeak,
     long heapMaxMb,
-    long preloadUpdatesCount) {
+    long preloadUpdatesCount,
+    int parallelism,
+    int ajuParallelism,
+    int aggParallelism,
+    long shuffleMs,
+    String pipelineMode) {
 
   public String toJsonLine() {
     StringBuilder sb = new StringBuilder(256);
@@ -27,8 +32,14 @@ public record MetricsSnapshot(
     appendJsonField(sb, "runner", runner, false);
     appendJsonField(sb, "tpch_data_dir", tpchDataDir, false);
     appendJsonField(sb, "git_commit", gitCommit, false);
+    appendJsonField(sb, "pipeline_mode", pipelineMode, false);
+    sb.append(',');
     sb.append("\"updates_total\":").append(updatesTotal).append(',');
     sb.append("\"join_deltas_total\":").append(joinDeltasTotal).append(',');
+    sb.append("\"parallelism\":").append(parallelism).append(',');
+    sb.append("\"aju_parallelism\":").append(ajuParallelism).append(',');
+    sb.append("\"agg_parallelism\":").append(aggParallelism).append(',');
+    sb.append("\"shuffle_ms\":").append(shuffleMs).append(',');
     sb.append("\"phases_ms\":").append(phasesMsToJson()).append(',');
     sb.append("\"wall_time_ms\":").append(wallTimeMs).append(',');
     sb.append("\"processing_time_ms\":").append(processingTimeMs).append(',');

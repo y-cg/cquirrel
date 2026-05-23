@@ -9,6 +9,10 @@ public final class ConsoleMetricsReporter implements MetricsReporter {
     System.out.println("=== CQuirrel L0 Metrics ===");
     System.out.printf("run_id:              %s%n", snapshot.runId());
     System.out.printf("runner:              %s%n", snapshot.runner());
+    System.out.printf("pipeline_mode:       %s%n", snapshot.pipelineMode());
+    System.out.printf("parallelism:         %d%n", snapshot.parallelism());
+    System.out.printf("aju_parallelism:     %d%n", snapshot.ajuParallelism());
+    System.out.printf("agg_parallelism:     %d%n", snapshot.aggParallelism());
     System.out.printf("git_commit:          %s%n", snapshot.gitCommit());
     System.out.printf("updates_total:       %,d%n", snapshot.updatesTotal());
     System.out.printf("join_deltas_total:   %,d%n", snapshot.joinDeltasTotal());

@@ -213,6 +213,95 @@ breakdown.
 
 ---
 
+## Case 5 — Flink split pipeline, bulk snapshot
+
+The **split** pipeline separates AJU from aggregation and top-K:
+
+`TpchUpdateSource` → `Q10AjuFunction` (p=1) → `keyBy(c_custkey)` →
+`TimedQ10Aggregator` → `GlobalTopKMergeFunction` → discarding sink.
+
+```sh
+CQUIRREL_PIPELINE=split CQUIRREL_PARALLELISM=1 just streamjob
+```
+
+**Use when:** Validating the multi-operator Flink DAG. With `parallelism=1`, the
+result in `result/flink-q10.csv` should match the unified pipeline (Case 3).
+
+---
+
+## Case 6 — Flink split pipeline, parallel aggregation
+
+Same as Case 5, but aggregation runs in parallel across customer groups. AJU
+remains single-partition (bottleneck).
+
+```sh
+CQUIRREL_PIPELINE=split CQUIRREL_PARALLELISM=4 CQUIRREL_AGG_PARALLELISM=4 just streamjob
+```
+
+**Use when:** Measuring aggregation-stage scaling. Overall throughput is still
+dominated by single-partition AJU unless Case 7 is used.
+
+---
+
+## Case 7 — Flink partitioned AJU, bulk snapshot
+
+The **partitioned** pipeline shards orders/lineitem AJU work by customer
+(`c_custkey`). Nation and customer dimension tables are replicated on every
+subtask during bootstrap.
+
+```sh
+CQUIRREL_PIPELINE=partitioned CQUIRREL_PARALLELISM=4 CQUIRREL_AJU_PARALLELISM=4 just streamjob
+```
+
+**Use when:** Measuring true multi-core AJU throughput (weak scaling).
+
+---
+
+## Case 8 — Flink partitioned AJU, incremental updates
+
+Combines partitioned AJU with incremental update files from `dbgen -U`:
+
+```sh
+dbgen -vf -s 0.1
+dbgen -v -U 4 -s 0.1
+
+CQUIRREL_PIPELINE=partitioned \
+  CQUIRREL_PARALLELISM=4 \
+  CQUIRREL_AJU_PARALLELISM=4 \
+  just streamjob
+```
+
+**Use when:** Evaluating partitioned incremental maintenance under streaming
+load.
+
+---
+
+## Parallelism scaling sweep
+
+Run multiple parallelism values and collect metrics into one JSONL file:
+
+```sh
+# Unified pipeline (infrastructure baseline; AJU stays p=1)
+just bench-scaling unified 1 2 4
+
+# Split pipeline with parallel aggregation
+CQUIRREL_PIPELINE=split just bench-scaling split 1 2 4
+
+# Partitioned AJU (multi-core scaling)
+CQUIRREL_PIPELINE=partitioned just bench-scaling partitioned 1 2 4
+```
+
+Or directly:
+
+```sh
+CQUIRREL_PIPELINE=partitioned ./scripts/bench-parallel.sh 1 2 4
+```
+
+The script prints a summary table of `updates_per_sec` and `join_deltas_per_sec`
+per parallelism value.
+
+---
+
 ## Correctness Verification with DuckDB
 
 Compare CQuirrel's output against DuckDB running the reference TPC-H Q10 query.

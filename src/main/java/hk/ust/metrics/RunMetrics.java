@@ -36,6 +36,11 @@ public class RunMetrics implements AutoCloseable {
   private long updatesTotal;
   private long joinDeltasTotal;
   private long preloadUpdatesCount;
+  private int parallelism = 1;
+  private int ajuParallelism = 1;
+  private int aggParallelism = 1;
+  private long shuffleMs;
+  private String pipelineMode = "unified";
 
   private RunMetrics(String runner, String tpchDataDir, List<MetricsReporter> reporters) {
     this.runId = MetricsSnapshot.newRunId();
@@ -101,6 +106,26 @@ public class RunMetrics implements AutoCloseable {
     this.preloadUpdatesCount = preloadUpdatesCount;
   }
 
+  public void setParallelism(int parallelism) {
+    this.parallelism = parallelism;
+  }
+
+  public void setAjuParallelism(int ajuParallelism) {
+    this.ajuParallelism = ajuParallelism;
+  }
+
+  public void setAggParallelism(int aggParallelism) {
+    this.aggParallelism = aggParallelism;
+  }
+
+  public void setShuffleMs(long shuffleMs) {
+    this.shuffleMs = shuffleMs;
+  }
+
+  public void setPipelineMode(String pipelineMode) {
+    this.pipelineMode = pipelineMode;
+  }
+
   @Override
   public void close() {
     if (this == DISABLED) {
@@ -153,7 +178,12 @@ public class RunMetrics implements AutoCloseable {
         joinDeltasPerSec,
         MemorySampler.toMb(memorySampler.peakUsedBytes()),
         MemorySampler.toMb(memorySampler.maxBytes()),
-        preloadUpdatesCount);
+        preloadUpdatesCount,
+        parallelism,
+        ajuParallelism,
+        aggParallelism,
+        shuffleMs,
+        pipelineMode);
   }
 
   private static long nanosToMillis(long nanos) {
@@ -235,6 +265,21 @@ public class RunMetrics implements AutoCloseable {
 
     @Override
     public void setPreloadUpdatesCount(long preloadUpdatesCount) {}
+
+    @Override
+    public void setParallelism(int parallelism) {}
+
+    @Override
+    public void setAjuParallelism(int ajuParallelism) {}
+
+    @Override
+    public void setAggParallelism(int aggParallelism) {}
+
+    @Override
+    public void setShuffleMs(long shuffleMs) {}
+
+    @Override
+    public void setPipelineMode(String pipelineMode) {}
 
     @Override
     public void close() {}

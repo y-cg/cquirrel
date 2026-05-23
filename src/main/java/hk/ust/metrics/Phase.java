@@ -6,7 +6,11 @@ public enum Phase {
   AJU("aju"),
   AGGREGATE("aggregate"),
   TOPK("topk"),
-  SINK("sink");
+  SINK("sink"),
+  /** Flink-only: per-record source collect and operator dispatch. */
+  RUNTIME("runtime"),
+  /** Flink-only: MiniCluster startup/teardown not attributed to operators. */
+  CLUSTER("cluster");
 
   private final String id;
 

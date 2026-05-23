@@ -20,7 +20,11 @@ CQuirrel collects **run-level (L0)** metrics at the end of each execution: phase
 ### Flink vs standalone
 
 - **Standalone** splits `load` (parse) vs `aju` (`processElement`), and times `aggregate`, `topk`, `sink` separately.
-- **Flink** times file preload as `load` and the entire `env.execute()` pipeline as `aju` (aggregate, top-K, and sink run inside Flink and are not split at L0).
+- **Flink** records the same phase names inside `env.execute()` via operator instrumentation. Additional Flink-only phases:
+  - `runtime` — `Source.collect` and per-record operator dispatch
+  - `cluster` — MiniCluster startup/teardown not attributed to operators
+- After each Flink run, a **standalone-aligned breakdown** is printed to stdout.
+- **`processing_time_ms`** (both runners) = `aju` + `aggregate` + `topk` + `sink` (excludes `load`, `runtime`, `cluster`).
 
 ## Environment variables
 
@@ -28,6 +32,8 @@ CQuirrel collects **run-level (L0)** metrics at the end of each execution: phase
 |----------|---------|-------------|
 | `CQUIRREL_METRICS` | `on` | Set to `off` or `false` to disable |
 | `CQUIRREL_METRICS_OUT` | `result/metrics.jsonl` in devenv shell | Append one JSON line per run to this file |
+| `CQUIRREL_OUTPUT_POLICY` | `ON_JOB_END` | See [docs/running.md](running.md) |
+| `CQUIRREL_INPUT_BATCH_SIZE` | unbounded | Input batch size for `Q10BatchEngine` |
 
 ## Example
 

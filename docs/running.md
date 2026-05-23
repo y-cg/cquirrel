@@ -103,6 +103,24 @@ The build produces `target/cquirrel-0.1.0.jar`.
 CQuirrel provides two entry points: a Flink streaming job and a
 standalone single-threaded runner.
 
+Both entry points share the same core: [`Q10BatchEngine`](src/main/java/hk/ust/engine/Q10BatchEngine.java)
+(AJU + aggregation + top-K materialization). Input batching and output timing are configured
+independently:
+
+| Variable / property | Default | Description |
+| ------------------- | ------- | ----------- |
+| `CQUIRREL_OUTPUT_POLICY` / `q10.output.policy` | `ON_JOB_END` | When to emit top-K: `ON_EACH_DELTA`, `ON_BATCH_END`, `ON_JOB_END` |
+| `CQUIRREL_INPUT_BATCH_SIZE` / `q10.input.batch.size` | unbounded (`0`) | Tuple updates per input batch; `1` = one update per batch |
+
+**Output policies**
+
+- `ON_JOB_END` — bulk snapshot at end (default; matches paper-style eval)
+- `ON_BATCH_END` — emit current top-20 after each input batch (Standalone also ends a batch after each `.tbl`)
+- `ON_EACH_DELTA` — emit only when the top-20 set changes (finest incremental output)
+
+Incremental policies write snapshot CSVs next to the main output file, e.g.
+`flink-q10.csv.batch_end.3.csv`.
+
 ### Standalone Runner (recommended for quick verification)
 
 Runs the AJU algorithm in a single thread without Flink overhead. Useful
@@ -125,7 +143,7 @@ java -cp target/cquirrel-0.1.0.jar:$(mvn dependency:build-classpath -q -Dmdep.ou
 ### Flink Streaming Job
 
 Runs the full AJU pipeline as a Flink streaming application:
-Source -> Q10ProcessFunction -> Q10Aggregator -> TopKMaintainer -> DeltaSink
+TpchUpdateSource -> Q10UnifiedBatchFunction (AJU + batch aggregate + top-K) -> discarding sink
 
 ```sh
 mvn -q exec:java -Dexec.mainClass=hk.ust.AjuStreamJob

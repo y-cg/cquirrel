@@ -120,6 +120,11 @@ public final class Q10BatchEngine {
     }
   }
 
+  /** Finalizes pending input without materializing output; used by sharded runners. */
+  public void finishWithoutOutput() throws Exception {
+    endInputBatch();
+  }
+
   public long joinDeltasTotal() {
     return joinDeltasTotal;
   }

@@ -9,6 +9,7 @@ implementation of TPC-H Q10, and how to verify correctness against DuckDB.
 - [Generating Test Data](#generating-test-data)
 - [Building](#building)
 - [Case 1 — Standalone, bulk snapshot (`ON_JOB_END`)](#case-1--standalone-bulk-snapshot-on_job_end)
+- [Multi-Core Standalone Benchmark](#multi-core-standalone-benchmark)
 - [Case 2 — Standalone, incremental batch output (`ON_BATCH_END`)](#case-2--standalone-incremental-batch-output-on_batch_end)
 - [Case 3 — Flink streaming, bulk snapshot (`ON_JOB_END`)](#case-3--flink-streaming-bulk-snapshot-on_job_end)
 - [Case 4 — Flink streaming with incremental updates](#case-4--flink-streaming-with-incremental-updates)
@@ -91,7 +92,7 @@ The build produces `target/cquirrel-0.1.0.jar`.
 
 ## Case 1 — Standalone, bulk snapshot (`ON_JOB_END`)
 
-The standalone runner executes AJU in a single thread without Flink overhead.
+By default, the standalone runner executes AJU in a single thread without Flink overhead.
 `ON_JOB_END` (default) emits the top-20 only at the very end — matching the
 paper-style bulk evaluation.
 
@@ -110,6 +111,30 @@ reference result for correctness checking. This is the fastest single-run mode.
 
 **Expected metrics:** `processing_time_ms` = `aju` + `aggregate` + `topk` +
 `sink` combined. No incremental outputs are written during the run.
+
+---
+
+## Multi-Core Standalone Benchmark
+
+Set `CQUIRREL_PARALLELISM` or `-Dq10.parallelism` above `1` to run one
+benchmark across multiple Q10 engine shards. This is not multiple concurrent
+benchmark runs: each shard owns independent AJU state, `orders` and `lineitem`
+are partitioned by `orderkey`, `nation` and `customer` are broadcast, and the
+runner merges shard aggregates before computing the global top-20.
+
+```sh
+CQUIRREL_PARALLELISM=8 mvn -q exec:java -Dexec.mainClass=hk.ust.StandaloneRunner
+
+# Or via just
+just standalone result/standalone-q10.csv 8
+```
+
+`ON_JOB_END` and `ON_BATCH_END` are supported in multi-core mode.
+`ON_EACH_DELTA` is intentionally rejected because global top-K would require a
+cross-shard merge on every delta and would distort the benchmark.
+
+For `parallelism > 1`, `processing_time_ms` contains summed worker CPU-style
+phase time, while throughput is based on end-to-end `wall_time_ms`.
 
 ---
 
@@ -289,6 +314,7 @@ Each run produces a JSON line in `result/metrics.jsonl` (when
 {
   "runner": "standalone",
   "tpch_data_dir": "/path/to/tpch_data",
+  "parallelism": 1,
   "updates_total": 481661,
   "join_deltas_total": 13420,
   "phases_ms": {
@@ -315,11 +341,12 @@ Each run produces a JSON line in `result/metrics.jsonl` (when
 
 | Field | Meaning |
 |-------|---------|
+| `parallelism` | Number of standalone Q10 engine shards used for the run |
 | `updates_total` | Tuple updates processed (all 4 tables combined) |
 | `join_deltas_total` | Join results emitted from AJU (only non-filtered tuples become alive) |
 | `processing_time_ms` | `aju` + `aggregate` + `topk` + `sink` (excludes `load`) |
-| `throughput.updates_per_sec` | Input throughput = `updates_total / processing_time_ms` |
-| `throughput.join_deltas_per_sec` | AJU throughput = `join_deltas_total / processing_time_ms` |
+| `throughput.updates_per_sec` | Input throughput; multi-core standalone uses `wall_time_ms`, single-thread uses `processing_time_ms` |
+| `throughput.join_deltas_per_sec` | AJU throughput on the same timing basis as input throughput |
 
 **Flink-specific fields:**
 

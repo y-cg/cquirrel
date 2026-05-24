@@ -2,6 +2,7 @@ package hk.ust.metrics;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
@@ -36,6 +37,7 @@ public class RunMetrics implements AutoCloseable {
   private long updatesTotal;
   private long joinDeltasTotal;
   private long preloadUpdatesCount;
+  private int parallelism = 1;
 
   private RunMetrics(String runner, String tpchDataDir, List<MetricsReporter> reporters) {
     this.runId = MetricsSnapshot.newRunId();
@@ -101,6 +103,10 @@ public class RunMetrics implements AutoCloseable {
     this.preloadUpdatesCount = preloadUpdatesCount;
   }
 
+  public void setParallelism(int parallelism) {
+    this.parallelism = Math.max(1, parallelism);
+  }
+
   @Override
   public void close() {
     if (this == DISABLED) {
@@ -135,15 +141,17 @@ public class RunMetrics implements AutoCloseable {
       }
     }
 
-    double processingSec = processingTimeMs / 1000.0;
-    double updatesPerSec = processingSec > 0 ? updatesTotal / processingSec : 0;
-    double joinDeltasPerSec = processingSec > 0 ? joinDeltasTotal / processingSec : 0;
+    long throughputTimeMs = parallelism > 1 ? wallTimeMs : processingTimeMs;
+    double throughputSec = throughputTimeMs / 1000.0;
+    double updatesPerSec = throughputSec > 0 ? updatesTotal / throughputSec : 0;
+    double joinDeltasPerSec = throughputSec > 0 ? joinDeltasTotal / throughputSec : 0;
 
     return new MetricsSnapshot(
         runId,
         runner,
         tpchDataDir,
         resolveGitCommit(),
+        parallelism,
         updatesTotal,
         joinDeltasTotal,
         Map.copyOf(phasesMs),
@@ -166,7 +174,9 @@ public class RunMetrics implements AutoCloseable {
           new ProcessBuilder("git", "rev-parse", "--short", "HEAD")
               .redirectErrorStream(true)
               .start();
-      try (var reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+      try (var reader =
+          new BufferedReader(
+              new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
         String line = reader.readLine();
         if (process.waitFor() == 0 && line != null && !line.isBlank()) {
           return line.trim();
@@ -235,6 +245,9 @@ public class RunMetrics implements AutoCloseable {
 
     @Override
     public void setPreloadUpdatesCount(long preloadUpdatesCount) {}
+
+    @Override
+    public void setParallelism(int parallelism) {}
 
     @Override
     public void close() {}

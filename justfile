@@ -1,5 +1,5 @@
-standalone output="result/standalone-q10.csv":
-    mvn -q exec:java -Dexec.mainClass=hk.ust.StandaloneRunner -Dq10.output={{output}}
+standalone output="result/standalone-q10.csv" parallelism="1":
+    mvn -q exec:java -Dexec.mainClass=hk.ust.StandaloneRunner -Dq10.output={{output}} -Dq10.parallelism={{parallelism}}
 
 
 streamjob output="result/flink-q10.csv":

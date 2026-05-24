@@ -10,6 +10,7 @@ public final class ConsoleMetricsReporter implements MetricsReporter {
     System.out.printf("run_id:              %s%n", snapshot.runId());
     System.out.printf("runner:              %s%n", snapshot.runner());
     System.out.printf("git_commit:          %s%n", snapshot.gitCommit());
+    System.out.printf("parallelism:         %,d%n", snapshot.parallelism());
     System.out.printf("updates_total:       %,d%n", snapshot.updatesTotal());
     System.out.printf("join_deltas_total:   %,d%n", snapshot.joinDeltasTotal());
     System.out.println("phases_ms:");

@@ -6,13 +6,14 @@ CQuirrel collects **run-level (L0)** metrics at the end of each execution: phase
 
 | Field | Description |
 |-------|-------------|
+| `parallelism` | Standalone engine shard count for this run (`1` is the single-thread baseline) |
 | `updates_total` | Tuple updates processed (input count) |
 | `join_deltas_total` | Join deltas emitted (standalone only; Flink reports `0`) |
 | `phases_ms` | `load`, `aju`, `aggregate`, `topk`, `sink` |
 | `wall_time_ms` | Total wall time including load |
 | `processing_time_ms` | Sum of `aju` + `aggregate` + `topk` + `sink` (excludes `load`) |
-| `throughput.updates_per_sec` | `updates_total / processing_time` |
-| `throughput.join_deltas_per_sec` | `join_deltas_total / processing_time` |
+| `throughput.updates_per_sec` | `updates_total / processing_time` for `parallelism=1`; `updates_total / wall_time` for multi-core standalone |
+| `throughput.join_deltas_per_sec` | Same timing basis as `throughput.updates_per_sec` |
 | `memory.heap_used_mb_peak` | Peak heap used during the run |
 | `memory.heap_max_mb` | Configured max heap (`-Xmx`) |
 | `memory.preload_updates_count` | Pre-loaded updates in Flink (`fromCollection`) |
@@ -20,6 +21,7 @@ CQuirrel collects **run-level (L0)** metrics at the end of each execution: phase
 ### Flink vs standalone
 
 - **Standalone** splits `load` (parse) vs `aju` (`processElement`), and times `aggregate`, `topk`, `sink` separately.
+- **Multi-core standalone** reports summed worker phase time in `processing_time_ms`; use `wall_time_ms` and throughput for end-to-end scaling.
 - **Flink** records the same phase names inside `env.execute()` via operator instrumentation. Additional Flink-only phases:
   - `runtime` — `Source.collect` and per-record operator dispatch
   - `cluster` — MiniCluster startup/teardown not attributed to operators
@@ -34,6 +36,7 @@ CQuirrel collects **run-level (L0)** metrics at the end of each execution: phase
 | `CQUIRREL_METRICS_OUT` | `result/metrics.jsonl` in devenv shell | Append one JSON line per run to this file |
 | `CQUIRREL_OUTPUT_POLICY` | `ON_JOB_END` | See [docs/running.md](running.md) |
 | `CQUIRREL_INPUT_BATCH_SIZE` | unbounded | Input batch size for `Q10BatchEngine` |
+| `CQUIRREL_PARALLELISM` | `1` | Number of standalone Q10 engine shards; values above `1` enable multi-core benchmark mode |
 
 ## Example
 

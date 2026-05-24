@@ -60,6 +60,16 @@ public class Q10RevenueAggregator {
 
   public record GroupState(long custkey, long revenueCents, GroupInfo info) {}
 
+  /** Merges a final per-customer aggregate from an independent shard. */
+  public void mergeGroup(long custkey, long revenueCents, GroupInfo info) {
+    if (revenueCents <= 0 || info == null) {
+      return;
+    }
+    revenueByCustomer.merge(custkey, revenueCents, Long::sum);
+    groupInfo.putIfAbsent(custkey, info);
+    countByCustomer.put(custkey, 1);
+  }
+
   public Map<Long, Long> revenueByCustomer() {
     return revenueByCustomer;
   }

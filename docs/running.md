@@ -123,11 +123,14 @@ Incremental policies write snapshot CSVs next to the main output file, e.g.
 
 ### Standalone Runner (recommended for quick verification)
 
-Runs the AJU algorithm in a single thread without Flink overhead. Useful
-for correctness verification and profiling.
+Runs the AJU algorithm without Flink overhead. By default this is the
+single-thread baseline; set `CQUIRREL_PARALLELISM` or `-Dq10.parallelism` above
+`1` to enable multi-core benchmark mode.
 
 ```sh
 mvn -q exec:java -Dexec.mainClass=hk.ust.StandaloneRunner
+
+CQUIRREL_PARALLELISM=8 mvn -q exec:java -Dexec.mainClass=hk.ust.StandaloneRunner
 ```
 
 Or with an explicit classpath:

@@ -9,6 +9,7 @@ public record MetricsSnapshot(
     String runner,
     String tpchDataDir,
     String gitCommit,
+    int parallelism,
     long updatesTotal,
     long joinDeltasTotal,
     Map<String, Long> phasesMs,
@@ -27,6 +28,7 @@ public record MetricsSnapshot(
     appendJsonField(sb, "runner", runner, false);
     appendJsonField(sb, "tpch_data_dir", tpchDataDir, false);
     appendJsonField(sb, "git_commit", gitCommit, false);
+    sb.append("\"parallelism\":").append(parallelism).append(',');
     sb.append("\"updates_total\":").append(updatesTotal).append(',');
     sb.append("\"join_deltas_total\":").append(joinDeltasTotal).append(',');
     sb.append("\"phases_ms\":").append(phasesMsToJson()).append(',');
